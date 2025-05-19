@@ -9,6 +9,9 @@ import tqdm
 import pickle
 import argparse
 import json
+import tkinter as tk
+from tkinter import ttk, filedialog
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
 
@@ -345,51 +348,236 @@ def post_process(l_in):
             
             
             
-if __name__ == '__main__':
-
-        parser = argparse.ArgumentParser(description="Video Analysis")
-        parser.add_argument("filename", help="Name of the file to process")
-        parser.add_argument("-r",  type=int, default=None, help="rotation")
-        parser.add_argument("-x",  type=int, default=None, help="shift x")
-        parser.add_argument("-y",  type=int, default=None, help="shift y")
-        parser.add_argument("-s",  type=int, default=2, help="start frame for alignment")
-        parser.add_argument("-p",  default='1', help="start frame for alignment")
+class PPGPreprocessGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("PPG Video Preprocessor")
         
+        # Variables
+        self.filename = tk.StringVar()
+        self.rotation = tk.StringVar(value="0")
+        self.x_shift = tk.StringVar(value="0")
+        self.y_shift = tk.StringVar(value="0")
+        self.start_frame = tk.StringVar(value="2")
+        self.proto = tk.StringVar(value='1')
         
-        args = parser.parse_args()
+        # Add trace to variables for real-time updates
+        self.rotation.trace_add("write", self.on_value_change)
+        self.x_shift.trace_add("write", self.on_value_change)
+        self.y_shift.trace_add("write", self.on_value_change)
+        self.start_frame.trace_add("write", self.on_value_change)
+        self.proto.trace_add("write", self.on_value_change)
         
-        if args.x is not None:
-            dictionary = {
-                "r": args.r,
-                "x": args.x,
-                "y": args.y,
-                "p": args.p,
-                "s":args.s
-            }
-             
-            json_object = json.dumps(dictionary, indent=4)
-             
-            with open(f'{args.filename}.json', "w") as outfile:
-                outfile.write(json_object)
-                
-            plot_frame(input_video_path  = args.filename, rotation = args.r, shift = (args.x, args.y,0), start_frame = args.s, proto = args.p)
-            plt.show()
-
+        # Create main frame
+        main_frame = ttk.Frame(root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # File selection
+        ttk.Label(main_frame, text="Video File:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Entry(main_frame, textvariable=self.filename, width=50, state='readonly').grid(row=0, column=1, padx=5)
+        ttk.Button(main_frame, text="Browse", command=self.browse_file).grid(row=0, column=2)
+        
+        # Parameters frame
+        params_frame = ttk.LabelFrame(main_frame, text="Alignment Parameters", padding="5")
+        params_frame.grid(row=1, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
+        
+        # Create sliders and entries for parameters
+        # Rotation
+        ttk.Label(params_frame, text="Rotation:").grid(row=0, column=0, sticky=tk.W)
+        rotation_frame = ttk.Frame(params_frame)
+        rotation_frame.grid(row=0, column=1, sticky=(tk.W, tk.E))
+        ttk.Scale(rotation_frame, from_=-180, to=180, orient=tk.HORIZONTAL, 
+                  variable=self.rotation, command=self.on_slider_change).grid(row=0, column=0, padx=5)
+        ttk.Entry(rotation_frame, textvariable=self.rotation, width=5).grid(row=0, column=1, padx=5)
+        
+        # X Shift
+        ttk.Label(params_frame, text="X Shift:").grid(row=1, column=0, sticky=tk.W)
+        x_frame = ttk.Frame(params_frame)
+        x_frame.grid(row=1, column=1, sticky=(tk.W, tk.E))
+        ttk.Scale(x_frame, from_=-500, to=500, orient=tk.HORIZONTAL, 
+                 variable=self.x_shift, command=self.on_slider_change).grid(row=0, column=0, padx=5)
+        ttk.Entry(x_frame, textvariable=self.x_shift, width=5).grid(row=0, column=1, padx=5)
+        
+        # Y Shift
+        ttk.Label(params_frame, text="Y Shift:").grid(row=2, column=0, sticky=tk.W)
+        y_frame = ttk.Frame(params_frame)
+        y_frame.grid(row=2, column=1, sticky=(tk.W, tk.E))
+        ttk.Scale(y_frame, from_=-500, to=500, orient=tk.HORIZONTAL, 
+                 variable=self.y_shift, command=self.on_slider_change).grid(row=0, column=0, padx=5)
+        ttk.Entry(y_frame, textvariable=self.y_shift, width=5).grid(row=0, column=1, padx=5)
+        
+        # Frame Selection
+        ttk.Label(params_frame, text="Frame:").grid(row=3, column=0, sticky=tk.W)
+        frame_frame = ttk.Frame(params_frame)
+        frame_frame.grid(row=3, column=1, sticky=(tk.W, tk.E))
+        self.frame_scale = ttk.Scale(frame_frame, from_=1, to=100, orient=tk.HORIZONTAL, 
+                 variable=self.start_frame, command=self.on_slider_change)
+        self.frame_scale.grid(row=0, column=0, padx=5)
+        ttk.Entry(frame_frame, textvariable=self.start_frame, width=5).grid(row=0, column=1, padx=5)
+        
+        # Proto Selection
+        ttk.Label(params_frame, text="Proto:").grid(row=4, column=0, sticky=tk.W)
+        proto_combo = ttk.Combobox(params_frame, textvariable=self.proto, 
+                                 values=['1', '2a', '2b', '3a', '3b', '4a', '4b'],
+                                 state='readonly', width=5)
+        proto_combo.grid(row=4, column=1, padx=5, sticky=tk.W)
+        proto_combo.bind('<<ComboboxSelected>>', self.on_value_change)
+        
+        # Process Button
+        ttk.Button(main_frame, text="Process Video", command=self.process_video).grid(row=2, column=0, columnspan=3, pady=10)
+        
+        # Create matplotlib figure
+        self.fig, self.ax = plt.subplots(figsize=(8, 6))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=main_frame)
+        self.canvas.get_tk_widget().grid(row=3, column=0, columnspan=3, pady=10)
+        
+        # Status label
+        self.status_var = tk.StringVar(value="Select a video file to begin")
+        ttk.Label(main_frame, textvariable=self.status_var).grid(row=4, column=0, columnspan=3)
+        
+    def get_int_value(self, var):
+        try:
+            return int(float(var.get()))
+        except ValueError:
+            return 0
             
-        else:
-            with open(f'{args.filename}.json', 'r') as openfile:
-             
-                # Reading from json file
-                json_object = json.load(openfile)
-                args.r = json_object['r']
-                args.x = json_object['x']
-                args.y = json_object['y']
-                args.p = json_object['p']
-                args.s = json_object['s']
-                    
-
-        l, r = cal_frame(input_video_path  = args.filename, rotation = args.r, shift = (args.x, args.y,0), proto = args.p)
+    def on_slider_change(self, *args):
+        self.update_preview()
         
-        with open(f'{args.filename}.pkl', 'wb') as f:
-            pickle.dump({'l':l, 'r':r, 'x':args.x, 'y':args.y, 'rotation':args.r},f)
+    def on_value_change(self, *args):
+        self.root.after(100, self.update_preview)  # Delay update to prevent too frequent refreshes
+        
+    def browse_file(self):
+        filename = filedialog.askopenfilename(
+            filetypes=[("AVI files", "*.avi"), ("All files", "*.*")]
+        )
+        if filename:
+            try:
+                cap = cv2.VideoCapture(filename)
+                if not cap.isOpened():
+                    self.status_var.set("Error: Could not open video file")
+                    return
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.release()
+                
+                self.filename.set(filename)
+                self.frame_scale.configure(to=frame_count)
+                self.status_var.set(f"File loaded. Total frames: {frame_count}")
+                self.update_preview()
+            except Exception as e:
+                self.status_var.set(f"Error reading video: {str(e)}")
+            
+    def update_preview(self):
+        if not self.filename.get():
+            return
+            
+        try:
+            # Clear the previous plot
+            self.ax.clear()
+            
+            # Get the frame and apply transformations
+            cap = cv2.VideoCapture(self.filename.get())
+            if not cap.isOpened():
+                self.status_var.set("Error: Could not open video file")
+                return
+                
+            # Set frame position
+            frame_pos = self.get_int_value(self.start_frame)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos - 1)  # -1 because frame numbers start at 0
+            
+            # Read frame
+            ret, frame = cap.read()
+            if not ret:
+                self.status_var.set(f"Error: Could not read frame {frame_pos}")
+                return
+                
+            # Release video capture
+            cap.release()
+            
+            # Apply rotation and shift
+            frame = ndimage.rotate(frame, self.get_int_value(self.rotation))
+            frame = ndimage.shift(frame, (self.get_int_value(self.x_shift), 
+                                        self.get_int_value(self.y_shift), 0))
+            
+            # Display frame
+            self.ax.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            
+            # Draw grid overlay
+            self.ax.plot([0,2216//2], [1200//2,1200//2], 'b--')
+            self.ax.plot([1200//2,1200//2], [0,2216//2], 'b--')
+            
+            # Get grid points based on proto
+            rr, ll = get_frame(self.proto.get())
+            
+            # Draw rectangles
+            for y_offset in range(10):
+                for x_offset in range(10):
+                    # Right side
+                    ya = rr[x_offset][y_offset]['ya']
+                    yb = rr[x_offset][y_offset]['yb']
+                    xa = rr[x_offset][y_offset]['xa']
+                    xb = rr[x_offset][y_offset]['xb']
+                    self.ax.plot([xa,xb,xb,xa,xa], [ya,ya,yb,yb,ya], 'r')
+                    
+                    # Left side
+                    ya = ll[x_offset][y_offset]['ya']
+                    yb = ll[x_offset][y_offset]['yb']
+                    xa = ll[x_offset][y_offset]['xa']
+                    xb = ll[x_offset][y_offset]['xb']
+                    self.ax.plot([xa,xb,xb,xa,xa], [ya,ya,yb,yb,ya], 'r')
+            
+            # Update the canvas
+            self.canvas.draw()
+            self.status_var.set(f"Previewing frame {frame_pos}")
+            
+        except Exception as e:
+            self.status_var.set(f"Error updating preview: {str(e)}")
+        
+    def process_video(self):
+        if not self.filename.get():
+            self.status_var.set("Please select a video file first")
+            return
+            
+        try:
+            self.status_var.set("Processing video... This may take a while.")
+            self.root.update()
+            
+            # Save parameters to JSON
+            params = {
+                "r": self.get_int_value(self.rotation),
+                "x": self.get_int_value(self.x_shift),
+                "y": self.get_int_value(self.y_shift),
+                "p": self.proto.get(),
+                "s": self.get_int_value(self.start_frame)
+            }
+            
+            with open(f'{self.filename.get()}.json', "w") as outfile:
+                json.dump(params, outfile, indent=4)
+                
+            # Process video and save PKL
+            l, r = cal_frame(
+                input_video_path=self.filename.get(),
+                rotation=self.get_int_value(self.rotation),
+                shift=(self.get_int_value(self.x_shift), 
+                      self.get_int_value(self.y_shift), 0),
+                proto=self.proto.get()
+            )
+            
+            with open(f'{self.filename.get()}.pkl', 'wb') as f:
+                pickle.dump({
+                    'l': l,
+                    'r': r,
+                    'x': self.get_int_value(self.x_shift),
+                    'y': self.get_int_value(self.y_shift),
+                    'rotation': self.get_int_value(self.rotation)
+                }, f)
+            
+            self.status_var.set("Processing complete! Files saved successfully.")
+        except Exception as e:
+            self.status_var.set(f"Error during processing: {str(e)}")
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    app = PPGPreprocessGUI(root)
+    root.mainloop()
 
