@@ -1,0 +1,20 @@
+[project]
+name = "ad-ppg"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.10.1",
+    "nidaqmx>=1.0.2",
+    "numpy>=2.2.2",
+    "opencv-python>=4.11.0.86",
+    "pydaqmx>=1.4.6",
+    "pyqt6>=6.8.1",
+    "pyqtgraph>=0.13.7",
+    "pyserial>=3.5",
+    "pythonnet>=3.0.5",
+    "scipy>=1.15.2",
+    "serial>=0.0.97",
+    "tqdm>=4.67.1",
+]
