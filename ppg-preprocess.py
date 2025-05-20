@@ -361,12 +361,23 @@ class PPGPreprocessGUI:
         self.start_frame = tk.StringVar(value="2")
         self.proto = tk.StringVar(value='1')
         
+        # Preview scale factor (1/2 size for preview)
+        self.preview_scale = 2
+        
+        # Cache for frames and transformations
+        self.current_frame = None
+        self.current_frame_number = None
+        self.current_frame_full = None
+        self.last_rotation = None
+        self.last_x_shift = None
+        self.last_y_shift = None
+        self.last_proto = None
+        self.update_pending = False
+        
         # Add trace to variables for real-time updates
-        self.rotation.trace_add("write", self.on_value_change)
-        self.x_shift.trace_add("write", self.on_value_change)
-        self.y_shift.trace_add("write", self.on_value_change)
-        self.start_frame.trace_add("write", self.on_value_change)
-        self.proto.trace_add("write", self.on_value_change)
+        for var in [self.rotation, self.x_shift, self.y_shift, self.proto]:
+            var.trace_add("write", self.schedule_update)
+        self.start_frame.trace_add("write", self.on_frame_change)
         
         # Create main frame
         main_frame = ttk.Frame(root, padding="10")
@@ -444,8 +455,18 @@ class PPGPreprocessGUI:
     def on_slider_change(self, *args):
         self.update_preview()
         
+    def on_frame_change(self, *args):
+        """Handle frame number changes"""
+        self.current_frame = None
+        self.current_frame_full = None
+        self.last_rotation = None
+        self.last_x_shift = None
+        self.last_y_shift = None
+        self.schedule_update()
+        
     def on_value_change(self, *args):
-        self.root.after(100, self.update_preview)  # Delay update to prevent too frequent refreshes
+        """Handle parameter changes"""
+        self.root.after(100, self.update_preview)
         
     def browse_file(self):
         filename = filedialog.askopenfilename(
@@ -467,72 +488,153 @@ class PPGPreprocessGUI:
             except Exception as e:
                 self.status_var.set(f"Error reading video: {str(e)}")
             
+    def schedule_update(self, *args):
+        """Schedule an update if one isn't already pending"""
+        if not self.update_pending:
+            self.update_pending = True
+            self.root.after(50, self.update_preview)  # 50ms delay
+
+    def should_update_transform(self):
+        """Check if we need to recompute transformations"""
+        current_values = (
+            self.get_int_value(self.rotation),
+            self.get_int_value(self.x_shift),
+            self.get_int_value(self.y_shift),
+            self.proto.get()
+        )
+        last_values = (
+            self.last_rotation,
+            self.last_x_shift,
+            self.last_y_shift,
+            self.last_proto
+        )
+        return current_values != last_values
+
     def update_preview(self):
         if not self.filename.get():
+            self.update_pending = False
             return
             
         try:
-            # Clear the previous plot
-            self.ax.clear()
+            # Clear update flag first
+            self.update_pending = False
             
-            # Get the frame and apply transformations
-            cap = cv2.VideoCapture(self.filename.get())
-            if not cap.isOpened():
-                self.status_var.set("Error: Could not open video file")
-                return
-                
-            # Set frame position
+            # Get current values
             frame_pos = self.get_int_value(self.start_frame)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos - 1)  # -1 because frame numbers start at 0
+            rotation = self.get_int_value(self.rotation)
+            x_shift = self.get_int_value(self.x_shift)
+            y_shift = self.get_int_value(self.y_shift)
+            proto = self.proto.get()
             
-            # Read frame
-            ret, frame = cap.read()
-            if not ret:
-                self.status_var.set(f"Error: Could not read frame {frame_pos}")
-                return
+            # Load frame if needed
+            if self.current_frame is None:
+                small_frame, full_frame = self.load_frame(frame_pos)
+                if small_frame is None:
+                    return
+            else:
+                small_frame = self.current_frame
+                full_frame = self.current_frame_full
+            
+            # Only recompute transformations if values changed
+            if self.should_update_transform():
+                # Clear the previous plot
+                self.ax.clear()
                 
-            # Release video capture
-            cap.release()
-            
-            # Apply rotation and shift
-            frame = ndimage.rotate(frame, self.get_int_value(self.rotation))
-            frame = ndimage.shift(frame, (self.get_int_value(self.x_shift), 
-                                        self.get_int_value(self.y_shift), 0))
-            
-            # Display frame
-            self.ax.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            
-            # Draw grid overlay
-            self.ax.plot([0,2216//2], [1200//2,1200//2], 'b--')
-            self.ax.plot([1200//2,1200//2], [0,2216//2], 'b--')
-            
-            # Get grid points based on proto
-            rr, ll = get_frame(self.proto.get())
-            
-            # Draw rectangles
-            for y_offset in range(10):
-                for x_offset in range(10):
-                    # Right side
-                    ya = rr[x_offset][y_offset]['ya']
-                    yb = rr[x_offset][y_offset]['yb']
-                    xa = rr[x_offset][y_offset]['xa']
-                    xb = rr[x_offset][y_offset]['xb']
-                    self.ax.plot([xa,xb,xb,xa,xa], [ya,ya,yb,yb,ya], 'r')
-                    
-                    # Left side
-                    ya = ll[x_offset][y_offset]['ya']
-                    yb = ll[x_offset][y_offset]['yb']
-                    xa = ll[x_offset][y_offset]['xa']
-                    xb = ll[x_offset][y_offset]['xb']
-                    self.ax.plot([xa,xb,xb,xa,xa], [ya,ya,yb,yb,ya], 'r')
-            
-            # Update the canvas
-            self.canvas.draw()
+                # Apply transformations to small frame for display
+                transformed_frame = ndimage.rotate(small_frame, rotation)
+                transformed_frame = ndimage.shift(transformed_frame, 
+                                               (x_shift//self.preview_scale, 
+                                                y_shift//self.preview_scale, 
+                                                0))
+                
+                # Display downsampled frame
+                self.ax.imshow(cv2.cvtColor(transformed_frame, cv2.COLOR_BGR2RGB))
+                
+                # Set axis limits to match the downsampled frame size
+                h, w = transformed_frame.shape[:2]
+                self.ax.set_xlim(0, w)
+                self.ax.set_ylim(h, 0)
+                
+                # Draw grid overlay at original scale, but convert coordinates to preview scale
+                self.ax.plot([0, 2216//self.preview_scale], 
+                           [1200//self.preview_scale, 1200//self.preview_scale], 'b--')
+                self.ax.plot([1200//self.preview_scale, 1200//self.preview_scale], 
+                           [0, 2216//self.preview_scale], 'b--')
+                
+                # Get grid points based on proto (using original BINING)
+                rr, ll = get_frame(proto, BINING=2)
+                
+                # Draw rectangles (converting coordinates to preview scale)
+                for y_offset in range(10):
+                    for x_offset in range(10):
+                        # Right side
+                        ya = rr[x_offset][y_offset]['ya']//self.preview_scale
+                        yb = rr[x_offset][y_offset]['yb']//self.preview_scale
+                        xa = rr[x_offset][y_offset]['xa']//self.preview_scale
+                        xb = rr[x_offset][y_offset]['xb']//self.preview_scale
+                        self.ax.plot([xa,xb,xb,xa,xa], [ya,ya,yb,yb,ya], 'r')
+                        
+                        # Left side
+                        ya = ll[x_offset][y_offset]['ya']//self.preview_scale
+                        yb = ll[x_offset][y_offset]['yb']//self.preview_scale
+                        xa = ll[x_offset][y_offset]['xa']//self.preview_scale
+                        xb = ll[x_offset][y_offset]['xb']//self.preview_scale
+                        self.ax.plot([xa,xb,xb,xa,xa], [ya,ya,yb,yb,ya], 'r')
+                
+                # Update the canvas
+                self.canvas.draw()
+                
+                # Store current values
+                self.last_rotation = rotation
+                self.last_x_shift = x_shift
+                self.last_y_shift = y_shift
+                self.last_proto = proto
+                
             self.status_var.set(f"Previewing frame {frame_pos}")
             
         except Exception as e:
             self.status_var.set(f"Error updating preview: {str(e)}")
-        
+
+    def load_frame(self, frame_number):
+        """Load a frame and cache it"""
+        if (self.current_frame is not None and 
+            self.current_frame_number == frame_number):
+            return self.current_frame, self.current_frame_full
+            
+        try:
+            cap = cv2.VideoCapture(self.filename.get())
+            if not cap.isOpened():
+                self.status_var.set("Error: Could not open video file")
+                return None, None
+                
+            # Set frame position
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number - 1)
+            
+            # Read frame
+            ret, frame = cap.read()
+            cap.release()
+            
+            if not ret:
+                self.status_var.set(f"Error: Could not read frame {frame_number}")
+                return None, None
+            
+            # Store full-size frame for grid calculations
+            self.current_frame_full = frame.copy()
+            
+            # Downsample frame for display only
+            h, w = frame.shape[:2]
+            small_frame = cv2.resize(frame, (w//self.preview_scale, h//self.preview_scale), 
+                                   interpolation=cv2.INTER_NEAREST)  # Faster interpolation
+            
+            # Cache the frames
+            self.current_frame = small_frame
+            self.current_frame_number = frame_number
+            
+            return small_frame, self.current_frame_full
+        except Exception as e:
+            self.status_var.set(f"Error loading frame: {str(e)}")
+            return None, None
+
     def process_video(self):
         if not self.filename.get():
             self.status_var.set("Please select a video file first")
