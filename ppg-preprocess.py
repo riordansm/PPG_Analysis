@@ -12,6 +12,7 @@ import json
 import tkinter as tk
 from tkinter import ttk, filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import os
 
 
 
@@ -172,7 +173,6 @@ def get_frame_3a(BINING = 2):
     return rr, ll
 
 def get_frame_4a(BINING = 2):
-
     FRAME_BIAS = {'ya':2*500, 'yb':2*525,'xa':2*725, 'xb':2*750, 'xa2':2*435, 'xb2':2*460}
     WIN_SIZE = 50 // BINING
     
@@ -181,17 +181,17 @@ def get_frame_4a(BINING = 2):
 
     for y_offset in range(10):
         for x_offset in range(10):
-            ya = (FRAME_BIAS['ya']//BINING + y_offset*WIN_SIZE)*3 - 1300
-            yb = (FRAME_BIAS['yb']//BINING + y_offset*WIN_SIZE)*3 - 1300
-            xa = np.round((FRAME_BIAS['xa']//BINING + x_offset*WIN_SIZE)/0.9).astype(int) - 200
-            xb = np.round((FRAME_BIAS['xb']//BINING + x_offset*WIN_SIZE)/0.9).astype(int) - 200
+            xa = (FRAME_BIAS['ya']//BINING + y_offset*WIN_SIZE)*3 - 1300
+            xb = (FRAME_BIAS['yb']//BINING + y_offset*WIN_SIZE)*3 - 1300
+            ya = np.round((FRAME_BIAS['xa']//BINING + x_offset*WIN_SIZE)/1.3).astype(int) + 120
+            yb = np.round((FRAME_BIAS['xb']//BINING + x_offset*WIN_SIZE)/1.3).astype(int) + 120
 
             rr[x_offset][y_offset] = {'ya':ya, 'yb':yb, 'xa':xa, 'xb':xb}
 
-            ya = (FRAME_BIAS['ya']//BINING + y_offset*WIN_SIZE)*3 - 1300
-            yb = (FRAME_BIAS['yb']//BINING + y_offset*WIN_SIZE)*3 - 1300
-            xa = np.round((FRAME_BIAS['xa2']//BINING - x_offset*WIN_SIZE)/0.9).astype(int) + 90
-            xb = np.round((FRAME_BIAS['xb2']//BINING - x_offset*WIN_SIZE)/0.9).astype(int) + 90
+            xa = (FRAME_BIAS['ya']//BINING + y_offset*WIN_SIZE)*3 - 1300
+            xb = (FRAME_BIAS['yb']//BINING + y_offset*WIN_SIZE)*3 - 1300
+            ya = np.round((FRAME_BIAS['xa2']//BINING - x_offset*WIN_SIZE)/1.3).astype(int) + 120
+            yb = np.round((FRAME_BIAS['xb2']//BINING - x_offset*WIN_SIZE)/1.3).astype(int) + 120
 
             ll[x_offset][y_offset] = {'ya':ya, 'yb':yb, 'xa':xa, 'xb':xb}
     return rr, ll
@@ -204,7 +204,7 @@ def get_frame(proto = '1', BINING = 2):
     elif (proto == '4b'):
         rr, ll = get_frame_4b(BINING);
     elif (proto == '4a'):
-        rr, ll = get_frame_4b(BINING);
+        rr, ll = get_frame_4a(BINING);
     elif (proto == '3b'):
         rr, ll = get_frame_3b(BINING);
     elif (proto == '3a'):
@@ -678,8 +678,114 @@ class PPGPreprocessGUI:
         except Exception as e:
             self.status_var.set(f"Error during processing: {str(e)}")
 
+def process_single_video(video_path):
+    """Process a single video using parameters from its JSON file"""
+    try:
+        # Check if JSON exists
+        json_path = f'{video_path}.json'
+        if not os.path.exists(json_path):
+            print(f"Skipping {video_path} - no JSON file found")
+            return False
+            
+        # Check if PKL already exists
+        pkl_path = f'{video_path}.pkl'
+        if os.path.exists(pkl_path):
+            print(f"Skipping {video_path} - PKL file already exists")
+            return False
+            
+        # Load parameters
+        with open(json_path, 'r') as f:
+            params = json.load(f)
+            
+        # Process video
+        print(f"Processing {video_path}")
+        l, r = cal_frame(
+            input_video_path=video_path,
+            rotation=params['r'],
+            shift=(params['x'], params['y'], 0),
+            proto=params['p']
+        )
+        
+        # Save results
+        with open(pkl_path, 'wb') as f:
+            pickle.dump({
+                'l': l,
+                'r': r,
+                'x': params['x'],
+                'y': params['y'],
+                'rotation': params['r']
+            }, f)
+            
+        print(f"Completed processing {video_path}")
+        return True
+    except Exception as e:
+        print(f"Error processing {video_path}: {str(e)}")
+        return False
+
+def batch_process_videos(video_dir, max_workers=4):
+    """
+    Process multiple videos in parallel using ThreadPoolExecutor
+    
+    Args:
+        video_dir: Directory containing .avi files
+        max_workers: Maximum number of concurrent processing threads
+    """
+    # Get list of all .avi files in directory
+    video_files = [f for f in os.listdir(video_dir) 
+                  if f.endswith('.avi') and os.path.isfile(os.path.join(video_dir, f))]
+    
+    if not video_files:
+        print(f"No .avi files found in {video_dir}")
+        return
+        
+    print(f"Found {len(video_files)} video files")
+    
+    # Process videos in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all video processing tasks
+        future_to_video = {
+            executor.submit(process_single_video, os.path.join(video_dir, video)): video 
+            for video in video_files
+        }
+        
+        # Process results as they complete
+        completed = 0
+        failed = 0
+        for future in concurrent.futures.as_completed(future_to_video):
+            video = future_to_video[future]
+            try:
+                if future.result():
+                    completed += 1
+                else:
+                    failed += 1
+            except Exception as e:
+                print(f"Error processing {video}: {str(e)}")
+                failed += 1
+                
+        print(f"\nBatch processing complete:")
+        print(f"Successfully processed: {completed}")
+        print(f"Failed/Skipped: {failed}")
+
 if __name__ == '__main__':
-    root = tk.Tk()
-    app = PPGPreprocessGUI(root)
-    root.mainloop()
+    import argparse
+    import os
+    
+    parser = argparse.ArgumentParser(description='PPG Video Preprocessing')
+    parser.add_argument('--gui', action='store_true', help='Launch GUI interface')
+    parser.add_argument('--batch', type=str, help='Directory containing videos for batch processing')
+    parser.add_argument('--threads', type=int, default=4, help='Number of concurrent processing threads')
+    
+    args = parser.parse_args()
+    
+    if args.gui:
+        root = tk.Tk()
+        app = PPGPreprocessGUI(root)
+        root.mainloop()
+    elif args.batch:
+        if not os.path.isdir(args.batch):
+            print(f"Error: {args.batch} is not a valid directory")
+        else:
+            batch_process_videos(args.batch, max_workers=args.threads)
+    else:
+        parser.print_help()
 
