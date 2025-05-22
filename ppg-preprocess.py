@@ -555,11 +555,20 @@ class PPGPreprocessGUI:
                 self.ax.set_xlim(0, w)
                 self.ax.set_ylim(h, 0)
                 
-                # Draw grid overlay at original scale, but convert coordinates to preview scale
-                self.ax.plot([0, 2216//self.preview_scale], 
-                           [1200//self.preview_scale, 1200//self.preview_scale], 'b--')
-                self.ax.plot([1200//self.preview_scale, 1200//self.preview_scale], 
-                           [0, 2216//self.preview_scale], 'b--')
+                # Draw blue crosshairs exactly like in ppg-preprocess (1) but scaled for preview
+                # Original: plt.plot([0,2216//BINING], [1200//BINING,1200//BINING], 'b--')
+                # Original: plt.plot([1200//BINING,1200//BINING],[0,2216//BINING], 'b--')
+                BINING = 2  # This matches the BINING used in the original plot_frame function
+                
+                # Scale coordinates for preview: divide by preview_scale since image is downsampled
+                # Horizontal crosshair line
+                self.ax.plot([0, (2216//BINING)//self.preview_scale], 
+                           [(1200//BINING)//self.preview_scale, (1200//BINING)//self.preview_scale], 
+                           'b--', linewidth=2)
+                # Vertical crosshair line
+                self.ax.plot([(1200//BINING)//self.preview_scale, (1200//BINING)//self.preview_scale], 
+                           [0, (2216//BINING)//self.preview_scale], 
+                           'b--', linewidth=2)
                 
                 # Get grid points based on proto (using original BINING)
                 rr, ll = get_frame(proto, BINING=2)
