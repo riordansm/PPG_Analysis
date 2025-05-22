@@ -6,6 +6,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
+import hashlib
+import os
 
 def get_frame_default(BINING = 2):
     FRAME_BIAS = {'ya':2*500, 'yb':2*525,'xa':2*725, 'xb':2*750, 'xa2':2*435, 'xb2':2*460}
@@ -160,6 +162,33 @@ def get_frame(proto = '1', BINING = 2):
     else:
         rr,ll = get_frame_default(BINING)
     return rr,ll
+
+def get_code_version_hash():
+    """Generate a hash of the current code files to track version"""
+    hash_md5 = hashlib.md5()
+    
+    # Get the directory of the current script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # List of code files to include in hash
+    code_files = [
+        'ppg_alignment_gui.py',
+        'ppg-preprocess.py',
+        'ppg-preprocess (1).py'
+    ]
+    
+    for filename in code_files:
+        filepath = os.path.join(script_dir, filename)
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'rb') as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_md5.update(chunk)
+            except Exception:
+                # If we can't read a file, include its name in the hash
+                hash_md5.update(filename.encode('utf-8'))
+    
+    return hash_md5.hexdigest()[:12]  # Return first 12 characters for brevity
 
 class PPGAlignmentGUI:
     def __init__(self, root):
@@ -497,7 +526,8 @@ class PPGAlignmentGUI:
                 "x": self.get_int_value(self.x_shift),
                 "y": self.get_int_value(self.y_shift),
                 "p": self.proto.get(),
-                "s": self.get_int_value(self.start_frame)
+                "s": self.get_int_value(self.start_frame),
+                "v": get_code_version_hash()
             }
             
             json_filename = f'{self.filename.get()}.json'

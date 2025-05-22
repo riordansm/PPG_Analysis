@@ -6,7 +6,38 @@ import pickle
 import json
 import argparse
 import tqdm
+import hashlib
+import os
 from ppg_alignment_gui import get_frame  # Reuse the grid functions
+
+def get_code_version_hash():
+    """Generate a hash of the current code files to track version"""
+    hash_md5 = hashlib.md5()
+    
+    # Get the directory of the current script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # List of code files to include in hash
+    code_files = [
+        'ppg_alignment_gui.py',
+        'ppg-preprocess.py',
+        'ppg-preprocess (1).py',
+        'ppg_process.py',
+        'batch_process.py'
+    ]
+    
+    for filename in code_files:
+        filepath = os.path.join(script_dir, filename)
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'rb') as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_md5.update(chunk)
+            except Exception:
+                # If we can't read a file, include its name in the hash
+                hash_md5.update(filename.encode('utf-8'))
+    
+    return hash_md5.hexdigest()[:12]  # Return first 12 characters for brevity
 
 def post_process(l_in):
     """Post-process the frame data.
@@ -113,7 +144,8 @@ def process_video(input_video_path, json_path):
                 'r': r,
                 'x': x_shift,
                 'y': y_shift,
-                'rotation': rotation
+                'rotation': rotation,
+                'v': get_code_version_hash()
             }, f)
             
         print(f"Processing complete. Results saved to {input_video_path}.pkl")

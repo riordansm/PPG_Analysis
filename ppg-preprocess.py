@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import os
+import hashlib
 
 
 
@@ -659,7 +660,8 @@ class PPGPreprocessGUI:
                 "x": self.get_int_value(self.x_shift),
                 "y": self.get_int_value(self.y_shift),
                 "p": self.proto.get(),
-                "s": self.get_int_value(self.start_frame)
+                "s": self.get_int_value(self.start_frame),
+                "v": get_code_version_hash()
             }
             
             with open(f'{self.filename.get()}.json', "w") as outfile:
@@ -680,7 +682,8 @@ class PPGPreprocessGUI:
                     'r': r,
                     'x': self.get_int_value(self.x_shift),
                     'y': self.get_int_value(self.y_shift),
-                    'rotation': self.get_int_value(self.rotation)
+                    'rotation': self.get_int_value(self.rotation),
+                    'v': get_code_version_hash()
                 }, f)
             
             self.status_var.set("Processing complete! Files saved successfully.")
@@ -722,7 +725,8 @@ def process_single_video(video_path):
                 'r': r,
                 'x': params['x'],
                 'y': params['y'],
-                'rotation': params['r']
+                'rotation': params['r'],
+                'v': get_code_version_hash()
             }, f)
             
         print(f"Completed processing {video_path}")
@@ -774,6 +778,33 @@ def batch_process_videos(video_dir, max_workers=4):
         print(f"\nBatch processing complete:")
         print(f"Successfully processed: {completed}")
         print(f"Failed/Skipped: {failed}")
+
+def get_code_version_hash():
+    """Generate a hash of the current code files to track version"""
+    hash_md5 = hashlib.md5()
+    
+    # Get the directory of the current script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # List of code files to include in hash
+    code_files = [
+        'ppg_alignment_gui.py',
+        'ppg-preprocess.py',
+        'ppg-preprocess (1).py'
+    ]
+    
+    for filename in code_files:
+        filepath = os.path.join(script_dir, filename)
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'rb') as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_md5.update(chunk)
+            except Exception:
+                # If we can't read a file, include its name in the hash
+                hash_md5.update(filename.encode('utf-8'))
+    
+    return hash_md5.hexdigest()[:12]  # Return first 12 characters for brevity
 
 if __name__ == '__main__':
     import argparse
